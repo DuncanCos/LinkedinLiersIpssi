@@ -1,0 +1,32 @@
+:root {
+  --text: #1f2937;
+  --text-h: #111827;
+  --bg: #f8fafc;
+  --border: #d0d5dd;
+  font: 16px/1.5 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  color: var(--text);
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+}
+
+#root {
+  min-height: 100vh;
+  margin: 0 auto;
+  color: var(--text);
+}
+
+h1,
+h2 {
+  color: var(--text-h);
+}
+
+h1 {
+  margin-top: 0;
+}
+
+p {
+  margin: 0;
+}

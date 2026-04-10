@@ -13,7 +13,7 @@ if load_dotenv is not None:
 
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL_NAME = "google/gemma-3-4b-it:free"
+MODEL_NAME = "google/gemma-3-4b-it"
 
 
 def generate_summary(text: str) -> str:
@@ -25,9 +25,9 @@ def generate_summary(text: str) -> str:
         )
 
     prompt = (
-        "Make a short summary in exactly 3 sentences of this text:\n\n"
+        "Make a short summary in exactly 1 sentences of this text:\n\n"
         f"{text}\n\n"
-        "Return only the summary."
+        "Return only the summary, use the same language of the text."
     )
 
     try:
