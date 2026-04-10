@@ -27,7 +27,7 @@ def generate_summary(text: str) -> str:
     prompt = (
         "Make a short summary in exactly 1 sentences of this text:\n\n"
         f"{text}\n\n"
-        "Return only the summary, use the same language of the text."
+        "Return only the summary, respond in french."
     )
 
     try:

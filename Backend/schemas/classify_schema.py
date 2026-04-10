@@ -7,4 +7,9 @@ class ClassifyRequest(BaseModel):
 
 class ClassifyResponse(BaseModel):
     prediction: int = Field(..., ge=0, le=1)
+    predictions: dict[str, int]
+    model_count: int = Field(..., ge=1)
 
+
+class ModelsResponse(BaseModel):
+    models: list[str]

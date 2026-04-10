@@ -1,11 +1,46 @@
 from functools import lru_cache
+import os
 from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
 
 
-MODEL_PATH = Path(__file__).resolve().parent.parent / "LSTM2.h5"
+TRANSLATION_MODEL_NAME = "Helsinki-NLP/opus-mt-fr-en"
+MODELS_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_MODEL_NAME = "LSTM2"
+
+
+def _read_token_from_dotenv() -> str | None:
+    env_candidates = [
+        Path.cwd() / ".env",
+        Path(__file__).resolve().parent.parent / ".env",
+        Path(__file__).resolve().parent.parent.parent / ".env",
+    ]
+
+    for env_path in env_candidates:
+        if not env_path.exists():
+            continue
+        try:
+            for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                if key.strip() == "HF_TOKEN":
+                    parsed = value.strip().strip('"').strip("'")
+                    if parsed:
+                        return parsed
+        except OSError:
+            continue
+    return None
+
+
+def _get_hf_token() -> str | None:
+    env_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
+    if env_token:
+        return env_token
+    return _read_token_from_dotenv()
 
 
 def _extract_score(raw_prediction: Any) -> float:
@@ -74,7 +109,104 @@ def _prepare_text_input(model: Any, text: str) -> Any:
 
 
 @lru_cache(maxsize=1)
-def _get_model() -> Any:
+def _get_translation_components() -> tuple[Any, Any]:
+    try:
+        from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Transformers is not installed. "
+                "Install it to enable translation before classification."
+            ),
+        ) from exc
+
+    hf_token = _get_hf_token()
+    auth_kwargs: dict[str, str] = {}
+    if hf_token:
+        auth_kwargs["token"] = hf_token
+
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(TRANSLATION_MODEL_NAME, **auth_kwargs)
+        model = AutoModelForSeq2SeqLM.from_pretrained(TRANSLATION_MODEL_NAME, **auth_kwargs)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to load translation model: {exc}",
+        ) from exc
+
+    return tokenizer, model
+
+
+def _translate_to_english(text: str) -> str:
+    if not text.strip():
+        return text
+
+    try:
+        tokenizer, translation_model = _get_translation_components()
+        encoded = tokenizer(
+            text,
+            return_tensors="pt",
+            truncation=True,
+            max_length=512,
+        )
+        generated = translation_model.generate(
+            **encoded,
+            max_length=512,
+        )
+        translated = tokenizer.decode(
+            generated[0],
+            skip_special_tokens=True,
+        ).strip()
+        return translated if translated else text
+    except Exception:  # noqa: BLE001
+        # Translation is an optional pre-processing step: fallback to source text.
+        return text
+
+
+@lru_cache(maxsize=1)
+def _get_model_registry() -> dict[str, tuple[str, Path]]:
+    model_files = sorted(MODELS_DIR.glob("*.h5"), key=lambda path: path.stem.lower())
+    if not model_files:
+        raise HTTPException(
+            status_code=500,
+            detail=f"No .h5 model found in {MODELS_DIR}",
+        )
+
+    registry: dict[str, tuple[str, Path]] = {}
+    for model_path in model_files:
+        model_name = model_path.stem
+        registry[model_name.upper()] = (model_name, model_path)
+    return registry
+
+
+def get_available_models() -> list[str]:
+    registry = _get_model_registry()
+    return sorted((entry[0] for entry in registry.values()), key=str.lower)
+
+
+def _normalize_model_name(model_name: str | None) -> str:
+    registry = _get_model_registry()
+
+    requested = (model_name or "").strip()
+    if not requested:
+        fallback_key = DEFAULT_MODEL_NAME.upper()
+        if fallback_key in registry:
+            return registry[fallback_key][0]
+        return next(iter(sorted((entry[0] for entry in registry.values()), key=str.lower)))
+
+    normalized = requested.upper()
+    if normalized not in registry:
+        supported = ", ".join(get_available_models())
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported model '{model_name}'. Supported models: {supported}.",
+        )
+    return registry[normalized][0]
+
+
+@lru_cache(maxsize=16)
+def _get_model(model_name: str) -> Any:
     try:
         from tensorflow import keras
     except ImportError as exc:
@@ -86,14 +218,24 @@ def _get_model() -> Any:
             ),
         ) from exc
 
-    if not MODEL_PATH.exists():
+    registry = _get_model_registry()
+    model_entry = registry.get(model_name.upper())
+    if model_entry is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported model '{model_name}'.",
+        )
+
+    _, model_path = model_entry
+
+    if not model_path.exists():
         raise HTTPException(
             status_code=500,
-            detail=f"Model file not found: {MODEL_PATH}",
+            detail=f"Model file not found: {model_path}",
         )
 
     try:
-        return keras.models.load_model(MODEL_PATH)
+        return keras.models.load_model(model_path)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=500,
@@ -101,17 +243,36 @@ def _get_model() -> Any:
         ) from exc
 
 
-def classify_text(text: str) -> int:
-    model = _get_model()
+def _predict_with_model(text: str, model_name: str) -> int:
+    model = _get_model(model_name)
     model_input = _prepare_text_input(model, text)
-
     try:
         raw_prediction = model.predict(model_input, verbose=0)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to run prediction: {exc}",
+            detail=f"Failed to run prediction with model '{model_name}': {exc}",
         ) from exc
 
     score = _extract_score(raw_prediction)
     return 1 if score >= 0.5 else 0
+
+
+def classify_text(text: str, model_name: str | None = None) -> tuple[int, str]:
+    normalized_model_name = _normalize_model_name(model_name)
+    translated_text = _translate_to_english(text)
+    prediction = _predict_with_model(translated_text, normalized_model_name)
+    return prediction, normalized_model_name
+
+
+def classify_text_all(text: str) -> tuple[int, dict[str, int]]:
+    translated_text = _translate_to_english(text)
+    model_names = get_available_models()
+
+    predictions: dict[str, int] = {}
+    for model_name in model_names:
+        predictions[model_name] = _predict_with_model(translated_text, model_name)
+
+    positive_votes = sum(predictions.values())
+    majority = 1 if positive_votes >= (len(predictions) / 2) else 0
+    return majority, predictions

@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+httpx
+tensorflow
+transformers
+torch
+sentencepiece
+python-dotenv

@@ -7,6 +7,8 @@ function App() {
   const [text, setText] = useState('')
   const [summary, setSummary] = useState('')
   const [prediction, setPrediction] = useState(null)
+  const [predictionsByModel, setPredictionsByModel] = useState({})
+  const [modelCount, setModelCount] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -15,6 +17,8 @@ function App() {
     setError('')
     setSummary('')
     setPrediction(null)
+    setPredictionsByModel({})
+    setModelCount(0)
 
     if (!text.trim()) {
       setError('Entre un texte avant de lancer l\'analyse.')
@@ -48,12 +52,14 @@ function App() {
       }
 
       setSummary(summaryPayload.summary || '')
-      
+
       const value = Number(classifyPayload?.prediction)
       if (value !== 0 && value !== 1) {
         throw new Error('Réponse de classification invalide.')
       }
       setPrediction(value)
+      setPredictionsByModel(classifyPayload?.predictions || {})
+      setModelCount(Number(classifyPayload?.model_count) || 0)
     } catch (submitError) {
       setError(submitError.message || 'Impossible de joindre le backend.')
     } finally {
@@ -65,82 +71,94 @@ function App() {
     setText('')
     setSummary('')
     setPrediction(null)
+    setPredictionsByModel({})
+    setModelCount(0)
     setError('')
   }
 
   return (
     <main className="app-container">
-  <div className="glass-card">
-    <header className="header">
-      <div className="logo">LL</div>
-      <h1>LinkedIn <span className="highlight">Liers</span></h1>
-      <p className="subtitle">L'IA qui dégonfle les posts trop longs.</p>
-    </header>
+      <div className="glass-card">
+        <header className="header">
+          <div className="logo">LL</div>
+          <h1>LinkedIn <span className="highlight">Liers</span></h1>
+          <p className="subtitle">L'IA qui dégonfle les posts trop longs.</p>
+        </header>
 
-    <form className="form" onSubmit={handleSubmit}>
-      <div className="input-group">
-        <label htmlFor="text">Texte à résumer</label>
-        <textarea
-          id="text"
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          rows={8}
-          placeholder="Colle ici le post de 50 lignes du Zack..."
-          required
-        />
-        <div className="char-count">{text.length} caractères</div>
+        <form className="form" onSubmit={handleSubmit}>
+          <div className="input-group">
+            <label htmlFor="text">Texte à résumer</label>
+            <textarea
+              id="text"
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              rows={8}
+              placeholder="Colle ici le post de 50 lignes du Zack..."
+              required
+            />
+            <div className="char-count">{text.length} caractères</div>
+          </div>
+
+          <div className="form-actions">
+            <button
+              type="submit"
+              className={`submit-btn ${loading ? 'loading' : ''}`}
+              disabled={loading || !text}
+            >
+              {loading ? (
+                <span className="spinner"></span>
+              ) : (
+                'Analyser le post'
+              )}
+            </button>
+            <button type="button" className="clear-btn" onClick={handleClear} disabled={loading || !text}>
+              Clean
+            </button>
+          </div>
+        </form>
+
+        {error && (
+          <div className="error-badge">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" width="16"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            {error}
+          </div>
+        )}
+
+        {summary && (
+          <section className="result-area animate-in">
+            <div className="result-header">
+              <h2>Résumé exécutif</h2>
+              <button onClick={() => navigator.clipboard.writeText(summary)} className="copy-btn">
+                Copier
+              </button>
+            </div>
+            <div className="summary-content">
+              <p>{summary}</p>
+            </div>
+          </section>
+        )}
+
+        {prediction !== null && (
+          <section className="result-area animate-in">
+            <div className="result-header">
+              <h2>Classification (vote sur {modelCount} modèles)</h2>
+            </div>
+            <div className={`classification-content ${prediction === 1 ? 'classification-slop' : 'classification-ok'}`}>
+              <p className="prediction-value"> {prediction === 1 ? 'TOTAL IA SLOP' : 'isOK'}</p>
+            </div>
+            {Object.entries(predictionsByModel).length > 0 && (
+              <div className="summary-content">
+                <p>
+                  {Object.entries(predictionsByModel)
+                    .map(([name, value]) => `${name}: ${value === 1 ? 'SLOP' : 'OK'}`)
+                    .join(' | ')}
+                </p>
+              </div>
+            )}
+          </section>
+        )}
       </div>
-
-      <div className="form-actions">
-        <button type="submit" className={`submit-btn ${loading ? 'loading' : ''}`} disabled={loading || !text}>
-          {loading ? (
-            <span className="spinner"></span>
-          ) : (
-            'Analyser le post'
-          )}
-        </button>
-        <button type="button" className="clear-btn" onClick={handleClear} disabled={loading || !text}>
-          Clean
-        </button>
-      </div>
-    </form>
-
-    {error && (
-      <div className="error-badge">
-        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" width="16"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-        {error}
-      </div>
-    )}
-
-    {summary && (
-      <section className="result-area animate-in">
-        <div className="result-header">
-          <h2>Résumé exécutif</h2>
-          <button onClick={() => navigator.clipboard.writeText(summary)} className="copy-btn">
-            Copier
-          </button>
-        </div>
-        <div className="summary-content">
-          <p>{summary}</p>
-        </div>
-      </section>
-    )}
-
-    {prediction !== null && (
-      <section className="result-area animate-in">
-        <div className="result-header">
-          <h2>Classification</h2>
-        </div>
-        <div className={`classification-content ${prediction === 1 ? 'classification-slop' : 'classification-ok'}`}>
-          <p className="prediction-value">{prediction}</p>
-          <p className="prediction-label">
-            {prediction === 1 ? 'TOTAL IA SLOP' : 'isOK'}
-          </p>
-        </div>
-      </section>
-    )}
-  </div>
-</main>
+    </main>
   )
 }
 
